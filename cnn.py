@@ -127,6 +127,8 @@ class Net(nn.Module):
             print(f'Eval loss : {self.eval_model(testloader, criterion):.2f}')
             print('\n')
 
+            torch.save(self.state_dict(), 'models/cifar_resnet34.pth')
+
         print('Finished Training')
 
     def eval_model(self, testloader, criterion):
