@@ -199,20 +199,20 @@ class UNet(nn.Module):
         
 
 class Trainer:
-    def __init__(self, model, diffusion, optimizer, criterion, trainloader, epochs=10, device='cuda' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, model, diffusion, optimizer, criterion, trainloader, save_path, device='cuda' if torch.cuda.is_available() else 'cpu'):
         self.model = model.to(device)
         self.diffusion = diffusion
         self.optimizer = optimizer
         self.criterion = criterion
         self.trainloader = trainloader
-        self.epochs = epochs
+        self.save_path = save_path
         self.device = device
 
-    def train_model(self):
-        for epoch in range(self.epochs):
-            print(f'Epoch {epoch + 1}/{self.epochs}')
+    def train_model(self, epochs):
+        for epoch in range(epochs):
             self.model.train()
-            for i, (images, _) in enumerate(tqdm(self.trainloader)):
+            progress_bar = tqdm(self.trainloader, desc=f'Epoch {epoch + 1}/{epochs}')
+            for i, (images, _) in enumerate(progress_bar):
                 images = images.to(self.device)
                 t = self.diffusion.sample_timesteps(images.size(0)).to(self.device)
                 x_t, noise = self.diffusion.noise_images(images, t)
@@ -223,7 +223,13 @@ class Trainer:
                 loss.backward()
                 self.optimizer.step()
 
+                # Update the progress bar with the current loss
+                progress_bar.set_description(f"Epoch {epoch + 1}/{epochs} - Loss: {loss.item():.4f}")
+            
             self.visualize_performance(images)
+            
+        print('Training complete')
+        torch.save(self.model.state_dict(), self.save_path)
 
     def visualize_performance(self, images):
         self.model.eval()
@@ -233,7 +239,7 @@ class Trainer:
             noisy_images, _ = self.diffusion.noise_images(images, t)
             denoised_images = self.model(noisy_images, t)
 
-            fig, axs = plt.subplots(3, 5, figsize=(15, 9))
+            fig, axs = plt.subplots(3, images.size(0), figsize=(3 * images.size(0), 9))
             for i in range(5):
                 axs[0, i].imshow(images[i].permute(1, 2, 0).cpu())
                 axs[0, i].set_title('Original')
