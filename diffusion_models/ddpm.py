@@ -8,17 +8,16 @@ import matplotlib.pyplot as plt
 
 
 class Diffusion:
-    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=2e-2, img_size=64, device='gpu' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=2e-2, img_size=64, device='cuda' if torch.cuda.is_available() else 'cpu'):
         self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
         self.img_size = img_size
         self.device = device
 
-        self.beta = self.prepare_noise_schedule(schedule_type='linear')
+        self.beta = self.prepare_noise_schedule(schedule_type='linear').to(self.device)
         self.alpha = 1 - self.beta
-        self.alpha_cumprod = torch.cumprod(self.alpha, dim=0)
-
+        self.alpha_cumprod = torch.cumprod(self.alpha, dim=0).to(self.device)
 
     def prepare_noise_schedule(self, schedule_type='linear'):
         if schedule_type == 'linear':
@@ -28,8 +27,8 @@ class Diffusion:
         else:
             raise ValueError('Unknown schedule type')
         
-        return self.beta
-    
+        return self.beta.to(self.device)
+
     def noise_images(self, x, t):
         sqrt_alpha_cumprod = torch.sqrt(self.alpha_cumprod[t])[:, None, None, None]
         sqrt_one_minus_alpha_cumprod = torch.sqrt(1 - self.alpha_cumprod[t])[:, None, None, None]
@@ -43,9 +42,9 @@ class Diffusion:
     def sample(self, model, n):
         model.eval()
         with torch.no_grad():
-            x = torch.randn((n, 3, self.img_size, self.img_size)).to(self.device)
+            x = torch.randn((n, 3, self.img_size, self.img_size), device=self.device)
             for i in tqdm(reversed(range(1, self.noise_steps)), position=0):
-                t = (torch.ones(n, device=self.device) * i).long().to(self.device)
+                t = (torch.ones(n, device=self.device) * i).long()
                 predicted_noise = model(x, t)
                 alpha = self.alpha[t][:, None, None, None]
                 alpha_cumprod = self.alpha_cumprod[t][:, None, None, None]
@@ -190,7 +189,7 @@ class UNet(nn.Module):
         pos_enc_b = torch.cos(t.repeat(1, channels // 2) * inv_freq)
         pos_enc = torch.cat((pos_enc_a, pos_enc_b), dim=-1)
 
-        return pos_enc
+        return pos_enc.to(self.device)
 
     def forward(self, x, t):
         t = t.unsqueeze(1).type(torch.float)
@@ -250,6 +249,7 @@ class Trainer:
     def visualize_performance(self, images):
         self.model.eval()
         with torch.no_grad():
+            images = images.to(self.device)
             t = self.diffusion.sample_timesteps(images.size(0)).to(self.device)
             noisy_images, _ = self.diffusion.noise_images(images, t)
             denoised_images = self.model(noisy_images, t)
