@@ -38,27 +38,6 @@ class Diffusion:
     
     def sample_timesteps(self, n):
         return torch.randint(low=0, high=self.noise_steps, size=(n,), device=self.device)
-        
-    def sample(self, model, n):
-        model.eval()
-        with torch.no_grad():
-            x = torch.randn((n, 3, self.img_size, self.img_size), device=self.device)
-            for i in tqdm(reversed(range(1, self.noise_steps)), position=0):
-                t = (torch.ones(n, device=self.device) * i).long()
-                predicted_noise = model(x, t)
-                alpha = self.alpha[t][:, None, None, None]
-                alpha_cumprod = self.alpha_cumprod[t][:, None, None, None]
-                beta = self.beta[t][:, None, None, None]
-                if i > 0:
-                    noise = torch.randn_like(x)
-                else:
-                    noise = torch.zeros_like(x)
-                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / torch.sqrt(1 - alpha_cumprod)) * predicted_noise) + torch.sqrt(beta) * noise
-        model.train()
-        x = (x.clamp(-1, 1) + 1) / 2
-        x = (x * 255).type(torch.uint8)
-
-        return x
     
 
 class ConvBlock(nn.Module):
@@ -162,31 +141,31 @@ class UNet(nn.Module):
         self.device = device
         self.timestep_dim = timestep_dim
 
-        self.inc = ConvBlock(in_channels, 64//4)
-        self.down1 = DownConvBlock(64//4, 128//4, timestep_dim=self.timestep_dim)
-        self.attention1 = SelfAttentionBlock(128//4, 32)
-        self.down2 = DownConvBlock(128//4, 256//4, timestep_dim=self.timestep_dim)
-        self.attention2 = SelfAttentionBlock(256//4, 16)
-        self.down3 = DownConvBlock(256//4, 256//4, timestep_dim=self.timestep_dim)
-        self.attention3 = SelfAttentionBlock(256//4, 8)
+        self.inc = ConvBlock(in_channels, 64//4).to(device)
+        self.down1 = DownConvBlock(64//4, 128//4, timestep_dim=self.timestep_dim).to(device)
+        self.attention1 = SelfAttentionBlock(128//4, 32).to(device)
+        self.down2 = DownConvBlock(128//4, 256//4, timestep_dim=self.timestep_dim).to(device)
+        self.attention2 = SelfAttentionBlock(256//4, 16).to(device)
+        self.down3 = DownConvBlock(256//4, 256//4, timestep_dim=self.timestep_dim).to(device)
+        self.attention3 = SelfAttentionBlock(256//4, 8).to(device)
 
-        self.bottleneck1 = ConvBlock(256//4, 512//4)
-        self.bottleneck2 = ConvBlock(512//4, 512//4)
-        self.bottleneck3 = ConvBlock(512//4, 256//4)
+        self.bottleneck1 = ConvBlock(256//4, 512//4).to(device)
+        self.bottleneck2 = ConvBlock(512//4, 512//4).to(device)
+        self.bottleneck3 = ConvBlock(512//4, 256//4).to(device)
 
-        self.up1 = UpConvBlock(512//4, 128//4, timestep_dim=self.timestep_dim)
-        self.attention4 = SelfAttentionBlock(128//4, 16)
-        self.up2 = UpConvBlock(256//4, 64//4, timestep_dim=self.timestep_dim)
-        self.attention5 = SelfAttentionBlock(64//4, 32)
-        self.up3 = UpConvBlock(128//4, 64//4, timestep_dim=self.timestep_dim)
-        self.attention6 = SelfAttentionBlock(64//4, 64)
+        self.up1 = UpConvBlock(512//4, 128//4, timestep_dim=self.timestep_dim).to(device)
+        self.attention4 = SelfAttentionBlock(128//4, 16).to(device)
+        self.up2 = UpConvBlock(256//4, 64//4, timestep_dim=self.timestep_dim).to(device)
+        self.attention5 = SelfAttentionBlock(64//4, 32).to(device)
+        self.up3 = UpConvBlock(128//4, 64//4, timestep_dim=self.timestep_dim).to(device)
+        self.attention6 = SelfAttentionBlock(64//4, 64).to(device)
 
-        self.outc = nn.Conv2d(64//4, out_channels, kernel_size=1)
+        self.outc = nn.Conv2d(64//4, out_channels, kernel_size=1).to(device)
 
     def pos_encoding(self, t, channels):
-        inv_freq = 1. / (10000 ** (torch.arange(0, channels, 2).float() / channels))
-        pos_enc_a = torch.sin(t.repeat(1, channels // 2) * inv_freq)
-        pos_enc_b = torch.cos(t.repeat(1, channels // 2) * inv_freq)
+        inv_freq = 1. / (10000 ** (torch.arange(0, channels, 2).float().to(self.device) / channels))
+        pos_enc_a = torch.sin(t.repeat(1, channels // 2) * inv_freq).to(self.device)
+        pos_enc_b = torch.cos(t.repeat(1, channels // 2) * inv_freq).to(self.device)
         pos_enc = torch.cat((pos_enc_a, pos_enc_b), dim=-1)
 
         return pos_enc.to(self.device)
@@ -221,7 +200,7 @@ class UNet(nn.Module):
 
 class Trainer:
     def __init__(self, model, diffusion, optimizer, criterion, trainloader, epochs=10, device='cuda' if torch.cuda.is_available() else 'cpu'):
-        self.model = model
+        self.model = model.to(device)
         self.diffusion = diffusion
         self.optimizer = optimizer
         self.criterion = criterion
