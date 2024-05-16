@@ -8,26 +8,45 @@ import matplotlib.pyplot as plt
 
 
 class Diffusion:
-    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=2e-2, img_size=64, device='cuda' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, noise_steps=1000, 
+                 img_size=64, 
+                 schedule_type='linear', 
+                 device='cuda' if torch.cuda.is_available() else 'cpu'):
+        
         self.noise_steps = noise_steps
-        self.beta_start = beta_start
-        self.beta_end = beta_end
         self.img_size = img_size
         self.device = device
+        self.schedule_type = schedule_type
 
-        self.beta = self.prepare_noise_schedule(schedule_type='linear').to(self.device)
+        self.beta, self.alpha, self.alpha_cumprod = self.prepare_noise_schedule(schedule_type=schedule_type)
         self.alpha = 1 - self.beta
         self.alpha_cumprod = torch.cumprod(self.alpha, dim=0).to(self.device)
 
     def prepare_noise_schedule(self, schedule_type='linear'):
         if schedule_type == 'linear':
-            self.beta = torch.linspace(self.beta_start, self.beta_end, self.noise_steps)
+            scale = 1000 / self.noise_steps
+            beta_start = scale * 1e-4
+            beta_end = scale * 2e-2
+
+            self.beta = torch.linspace(beta_start, beta_end, self.noise_steps)
+            self.alpha = (1 - self.beta)
+            self.alpha_cumprod = torch.cumprod(self.alpha, dim=0)
+
         elif schedule_type == 'cosine':
-            self.beta = torch.cos(torch.linspace(0, 1, self.noise_steps) * math.pi / 2) * (self.beta_end - self.beta_start) + self.beta_start
+            def f(t):
+                return torch.cos((t / self.noise_steps + 0.008) / (1 + 0.008) * 0.5 * torch.pi) ** 2
+            
+            x = torch.linspace(0, self.noise_steps, self.noise_steps + 1)
+
+            self.alpha_cumprod = f(x) / f(torch.tensor([0]))
+            self.beta = 1 - self.alpha_cumprod[1:] / self.alpha_cumprod[:-1]
+            self.beta = torch.clip(self.beta, 0.0001, 0.999)
+            self.alpha = 1 - self.beta
         else:
-            raise ValueError('Unknown schedule type')
+            raise NotImplementedError(f"unknown beta schedule: {schedule_type}")
         
-        return self.beta.to(self.device)
+        return self.beta.to(self.device), self.alpha.to(self.device), self.alpha_cumprod.to(self.device)
+        
 
     def noise_images(self, x, t):
         sqrt_alpha_cumprod = torch.sqrt(self.alpha_cumprod[t])[:, None, None, None]
@@ -53,7 +72,6 @@ class Diffusion:
                 noise = torch.randn_like(x, device=self.device) if i > 0 else torch.zeros_like(x, device=self.device)
 
                 x = (1 / torch.sqrt(alpha)) * (x - predicted_noise * ((1 - alpha) / torch.sqrt(1 - alpha_cumprod))) + torch.sqrt(beta) * noise
-        
         model.train()
         return x
     
@@ -159,26 +177,26 @@ class UNet(nn.Module):
         self.device = device
         self.timestep_dim = timestep_dim
 
-        self.inc = ConvBlock(in_channels, 64//4).to(device)
-        self.down1 = DownConvBlock(64//4, 128//4, timestep_dim=self.timestep_dim).to(device)
-        self.attention1 = SelfAttentionBlock(128//4, 32).to(device)
-        self.down2 = DownConvBlock(128//4, 256//4, timestep_dim=self.timestep_dim).to(device)
-        self.attention2 = SelfAttentionBlock(256//4, 16).to(device)
-        self.down3 = DownConvBlock(256//4, 256//4, timestep_dim=self.timestep_dim).to(device)
-        self.attention3 = SelfAttentionBlock(256//4, 8).to(device)
+        self.inc = ConvBlock(in_channels, 64).to(device)
+        self.down1 = DownConvBlock(64, 128, timestep_dim=self.timestep_dim).to(device)
+        self.attention1 = SelfAttentionBlock(128, 32).to(device)
+        self.down2 = DownConvBlock(128, 256, timestep_dim=self.timestep_dim).to(device)
+        self.attention2 = SelfAttentionBlock(256, 16).to(device)
+        self.down3 = DownConvBlock(256, 256, timestep_dim=self.timestep_dim).to(device)
+        self.attention3 = SelfAttentionBlock(256, 8).to(device)
 
-        self.bottleneck1 = ConvBlock(256//4, 512//4).to(device)
-        self.bottleneck2 = ConvBlock(512//4, 512//4).to(device)
-        self.bottleneck3 = ConvBlock(512//4, 256//4).to(device)
+        self.bottleneck1 = ConvBlock(256, 512).to(device)
+        self.bottleneck2 = ConvBlock(512, 512).to(device)
+        self.bottleneck3 = ConvBlock(512, 256).to(device)
 
-        self.up1 = UpConvBlock(512//4, 128//4, timestep_dim=self.timestep_dim).to(device)
-        self.attention4 = SelfAttentionBlock(128//4, 16).to(device)
-        self.up2 = UpConvBlock(256//4, 64//4, timestep_dim=self.timestep_dim).to(device)
-        self.attention5 = SelfAttentionBlock(64//4, 32).to(device)
-        self.up3 = UpConvBlock(128//4, 64//4, timestep_dim=self.timestep_dim).to(device)
-        self.attention6 = SelfAttentionBlock(64//4, 64).to(device)
+        self.up1 = UpConvBlock(512, 128, timestep_dim=self.timestep_dim).to(device)
+        self.attention4 = SelfAttentionBlock(128, 16).to(device)
+        self.up2 = UpConvBlock(256, 64, timestep_dim=self.timestep_dim).to(device)
+        self.attention5 = SelfAttentionBlock(64, 32).to(device)
+        self.up3 = UpConvBlock(128, 64, timestep_dim=self.timestep_dim).to(device)
+        self.attention6 = SelfAttentionBlock(64, 64).to(device)
 
-        self.outc = nn.Conv2d(64//4, out_channels, kernel_size=1).to(device)
+        self.outc = nn.Conv2d(64, out_channels, kernel_size=1).to(device)
 
     def pos_encoding(self, t, channels):
         inv_freq = 1. / (10000 ** (torch.arange(0, channels, 2).float().to(self.device) / channels))
