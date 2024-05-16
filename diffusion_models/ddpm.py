@@ -228,8 +228,7 @@ class Trainer:
             
             generated_images = self.visualize_performance(n=images.size(0))
 
-            n = len(generated_images)
-            fig, axs = plt.subplots(1, n, figsize=(n * 3, 3))
+            fig, axs = plt.subplots(1, 4, figsize=(4 * 3, 3))
             for i, ax in enumerate(axs.flat):
                 img = generated_images[i].cpu().permute(1, 2, 0)
                 ax.imshow(img)
@@ -246,7 +245,7 @@ class Trainer:
             x = torch.randn((n, 3, self.diffusion.img_size, self.diffusion.img_size)).to(self.device)
             for i in tqdm(reversed(range(self.diffusion.noise_steps)), desc='Generating images'):
                 t = torch.full((n,), i, dtype=torch.long).to(self.device)
-                predicted_noise = self.diffusion.noise_images(x, t)
+                predicted_noise, _ = self.diffusion.noise_images(x, t)
                 alpha = self.diffusion.alpha[t][:, None, None, None]
                 alpha_cumprod = self.diffusion.alpha_cumprod[t][:, None, None, None]
                 beta = self.diffusion.beta[t][:, None, None, None]
@@ -255,7 +254,8 @@ class Trainer:
 
                 x = (1 / torch.sqrt(alpha)) * (x - predicted_noise * ((1 - alpha) / torch.sqrt(1 - alpha_cumprod))) + torch.sqrt(beta) * noise
 
-            x = (x.clamp(-1, 1) + 1) / 2
-            x = (x * 255).type(torch.uint8)
+            #x = (x.clamp(-1, 1) + 1) / 2
+            #x = (x * 255).type(torch.uint8)
         
         self.model.train()
+        return x
