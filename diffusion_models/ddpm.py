@@ -1,5 +1,5 @@
 import torch
-import math
+import numpy as np
 from tqdm import tqdm
 import torch
 import torch.nn as nn
@@ -263,6 +263,7 @@ class Trainer:
                 progress_bar.set_description(f"Epoch {epoch + 1}/{epochs} - Loss: {loss.item():.4f}")
             
             generated_images = self.diffusion.generate_images(self.model, n=images.size(0))
+            generated_images = np.clip(generated_images.cpu(), 0, 1)
 
             fig, axs = plt.subplots(1, 4, figsize=(4 * 3, 3))
             for i, ax in enumerate(axs.flat):
