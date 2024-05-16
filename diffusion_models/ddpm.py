@@ -240,7 +240,7 @@ class Trainer:
             denoised_images = self.model(noisy_images, t)
 
             fig, axs = plt.subplots(3, images.size(0), figsize=(3 * images.size(0), 9))
-            for i in range(5):
+            for i in range(images.size(0)):
                 axs[0, i].imshow(images[i].permute(1, 2, 0).cpu())
                 axs[0, i].set_title('Original')
                 axs[1, i].imshow(noisy_images[i].permute(1, 2, 0).cpu())
