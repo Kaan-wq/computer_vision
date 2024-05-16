@@ -39,6 +39,24 @@ class Diffusion:
     def sample_timesteps(self, n):
         return torch.randint(low=0, high=self.noise_steps, size=(n,), device=self.device)
     
+    def generate_images(self, model, n=4):
+        model.eval()
+        with torch.no_grad():
+            x = torch.randn((n, 3, self.img_size, self.img_size)).to(self.device)
+            for i in tqdm(reversed(range(self.noise_steps)), desc='Generating images'):
+                t = torch.full((n,), i, dtype=torch.long).to(self.device)
+                predicted_noise, _ = self.noise_images(x, t)
+                alpha = self.alpha[t][:, None, None, None]
+                alpha_cumprod = self.alpha_cumprod[t][:, None, None, None]
+                beta = self.beta[t][:, None, None, None]
+
+                noise = torch.randn_like(x, device=self.device) if i > 0 else torch.zeros_like(x, device=self.device)
+
+                x = (1 / torch.sqrt(alpha)) * (x - predicted_noise * ((1 - alpha) / torch.sqrt(1 - alpha_cumprod))) + torch.sqrt(beta) * noise
+        
+        model.train()
+        return x
+    
 
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, residual=False):
@@ -226,7 +244,7 @@ class Trainer:
                 # Update the progress bar with the current loss
                 progress_bar.set_description(f"Epoch {epoch + 1}/{epochs} - Loss: {loss.item():.4f}")
             
-            generated_images = self.visualize_performance(n=images.size(0))
+            generated_images = self.diffusion.generate_images(self.model, n=images.size(0))
 
             fig, axs = plt.subplots(1, 4, figsize=(4 * 3, 3))
             for i, ax in enumerate(axs.flat):
@@ -238,24 +256,3 @@ class Trainer:
             
         print('Training complete')
         torch.save(self.model.state_dict(), self.save_path)
-
-    def visualize_performance(self, n=4):
-        self.model.eval()
-        with torch.no_grad():
-            x = torch.randn((n, 3, self.diffusion.img_size, self.diffusion.img_size)).to(self.device)
-            for i in tqdm(reversed(range(self.diffusion.noise_steps)), desc='Generating images'):
-                t = torch.full((n,), i, dtype=torch.long).to(self.device)
-                predicted_noise, _ = self.diffusion.noise_images(x, t)
-                alpha = self.diffusion.alpha[t][:, None, None, None]
-                alpha_cumprod = self.diffusion.alpha_cumprod[t][:, None, None, None]
-                beta = self.diffusion.beta[t][:, None, None, None]
-
-                noise = torch.randn_like(x, device=self.device) if i > 0 else torch.zeros_like(x, device=self.device)
-
-                x = (1 / torch.sqrt(alpha)) * (x - predicted_noise * ((1 - alpha) / torch.sqrt(1 - alpha_cumprod))) + torch.sqrt(beta) * noise
-
-            #x = (x.clamp(-1, 1) + 1) / 2
-            #x = (x * 255).type(torch.uint8)
-        
-        self.model.train()
-        return x
