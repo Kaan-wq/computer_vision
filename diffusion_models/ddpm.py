@@ -226,29 +226,36 @@ class Trainer:
                 # Update the progress bar with the current loss
                 progress_bar.set_description(f"Epoch {epoch + 1}/{epochs} - Loss: {loss.item():.4f}")
             
-            self.visualize_performance(images)
+            generated_images = self.visualize_performance(n=images.size(0))
+
+            n = len(generated_images)
+            fig, axs = plt.subplots(1, n, figsize=(n * 3, 3))
+            for i, ax in enumerate(axs.flat):
+                img = generated_images[i].cpu().permute(1, 2, 0)
+                ax.imshow(img)
+                ax.axis('off')
+            plt.tight_layout()
+            plt.show()
             
         print('Training complete')
         torch.save(self.model.state_dict(), self.save_path)
 
-    def visualize_performance(self, images):
+    def visualize_performance(self, n=4):
         self.model.eval()
         with torch.no_grad():
-            images = images.to(self.device)
-            t = self.diffusion.sample_timesteps(images.size(0)).to(self.device)
-            noisy_images, _ = self.diffusion.noise_images(images, t)
-            denoised_images = self.model(noisy_images, t)
+            x = torch.randn((n, 3, self.diffusion.img_size, self.diffusion.img_size)).to(self.device)
+            for i in tqdm(reversed(range(self.diffusion.noise_steps)), desc='Generating images'):
+                t = torch.full((n,), i, dtype=torch.long).to(self.device)
+                predicted_noise = self.diffusion.noise_images(x, t)
+                alpha = self.diffusion.alpha[t][:, None, None, None]
+                alpha_cumprod = self.diffusion.alpha_cumprod[t][:, None, None, None]
+                beta = self.diffusion.beta[t][:, None, None, None]
 
-            fig, axs = plt.subplots(3, images.size(0), figsize=(3 * images.size(0), 9))
-            for i in range(images.size(0)):
-                axs[0, i].imshow(images[i].permute(1, 2, 0).cpu())
-                axs[0, i].set_title('Original')
-                axs[1, i].imshow(noisy_images[i].permute(1, 2, 0).cpu())
-                axs[1, i].set_title('Noisy')
-                axs[2, i].imshow(denoised_images[i].permute(1, 2, 0).cpu())
-                axs[2, i].set_title('Denoised')
+                noise = torch.randn_like(x, device=self.device) if i > 0 else torch.zeros_like(x, device=self.device)
 
-            for ax in axs.flat:
-                ax.axis('off')
+                x = (1 / torch.sqrt(alpha)) * (x - predicted_noise * ((1 - alpha) / torch.sqrt(1 - alpha_cumprod))) + torch.sqrt(beta) * noise
 
-            plt.show()
+            x = (x.clamp(-1, 1) + 1) / 2
+            x = (x * 255).type(torch.uint8)
+        
+        self.model.train()
