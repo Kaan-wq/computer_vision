@@ -280,7 +280,8 @@ class Trainer:
 
     def eval_model(self):
         self.model.eval()
-        losses = []
+        losses = [[] for _ in range(self.diffusion.noise_steps)]
+
         with torch.no_grad():
             progress_bar = tqdm(self.testloader, desc='Evaluating model')
             for i, (images, _) in enumerate(progress_bar):
@@ -288,11 +289,13 @@ class Trainer:
                 t = self.diffusion.sample_timesteps(images.size(0)).to(self.device)
                 x_t, noise = self.diffusion.noise_images(images, t)
                 predicted_noise = self.model(x_t, t)
-                loss = self.criterion(predicted_noise, noise)
 
-                losses.append(loss.item())
-                progress_bar.set_description(f"Evaluating model - Loss: {loss.item():.4f}")
+                for n, pred, time in zip(noise, predicted_noise, t):
+                    loss = self.criterion(pred, n)
+                    losses[time].append(loss.item())
 
-        print(f'Average loss: {np.mean(losses)}')
-        print('Evaluation complete')
-        self.model.train()
+            average_losses = [np.mean(lst) if lst else None for lst in losses]
+
+            print(f'Average losses per timestep: {average_losses}')
+            print('Evaluation complete')
+            self.model.train()
