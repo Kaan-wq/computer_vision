@@ -72,6 +72,7 @@ class Diffusion:
                 noise = torch.randn_like(x, device=self.device) if i > 0 else torch.zeros_like(x, device=self.device)
 
                 x = (1 / torch.sqrt(alpha)) * (x - predicted_noise * ((1 - alpha) / torch.sqrt(1 - alpha_cumprod))) + torch.sqrt(beta) * noise
+
         model.train()
         return x
     
@@ -235,12 +236,13 @@ class UNet(nn.Module):
         
 
 class Trainer:
-    def __init__(self, model, diffusion, optimizer, criterion, trainloader, save_path, device='cuda' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, model, diffusion, optimizer, criterion, trainloader, testloader, save_path, device='cuda' if torch.cuda.is_available() else 'cpu'):
         self.model = model.to(device)
         self.diffusion = diffusion
         self.optimizer = optimizer
         self.criterion = criterion
         self.trainloader = trainloader
+        self.testloader = testloader
         self.save_path = save_path
         self.device = device
 
@@ -275,3 +277,22 @@ class Trainer:
             
         print('Training complete')
         torch.save(self.model.state_dict(), self.save_path)
+
+    def eval_model(self):
+        self.model.eval()
+        losses = []
+        with torch.no_grad():
+            progress_bar = tqdm(self.testloader, desc='Evaluating model')
+            for i, (images, _) in enumerate(progress_bar):
+                images = images.to(self.device)
+                t = self.diffusion.sample_timesteps(images.size(0)).to(self.device)
+                x_t, noise = self.diffusion.noise_images(images, t)
+                predicted_noise = self.model(x_t, t)
+                loss = self.criterion(predicted_noise, noise)
+
+                losses.append(loss.item())
+                progress_bar.set_description(f"Evaluating model - Loss: {loss.item():.4f}")
+
+        print(f'Average loss: {np.mean(losses)}')
+        print('Evaluation complete')
+        self.model.train()
