@@ -296,6 +296,7 @@ class Trainer:
 
             average_losses = [np.mean(lst) if lst else None for lst in losses]
 
-            print(f'Average losses per timestep: {average_losses}')
             print('Evaluation complete')
             self.model.train()
+        
+        return average_losses
