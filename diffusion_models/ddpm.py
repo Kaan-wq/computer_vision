@@ -233,6 +233,18 @@ class UNet(nn.Module):
         output = self.outc(x)
 
         return output
+    
+
+class EMA:
+    def __init__(self, model, decay=0.99):
+        self.model = model
+        self.decay = decay
+        self.shadow = {k: v.clone().detach() for k, v in model.state_dict().items()}
+
+    def update(self):
+        with torch.no_grad():
+            for name, param in self.model.state_dict().items():
+                self.shadow[name] = self.decay * self.shadow[name] + (1 - self.decay) * param.data
         
 
 class Trainer:
@@ -245,6 +257,11 @@ class Trainer:
         self.testloader = testloader
         self.save_path = save_path
         self.device = device
+        self.ema = EMA(self.model)
+
+    def load_ema_weights(self):
+        ema_weights = torch.load(self.save_path.replace('.pth', '_ema.pth'))
+        self.ema.shadow.load_state_dict(ema_weights)    
 
     def train_model(self, epochs):
         for epoch in range(epochs):
@@ -260,6 +277,8 @@ class Trainer:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+
+                self.ema.update()
 
                 # Update the progress bar with the current loss
                 progress_bar.set_description(f"Epoch {epoch + 1}/{epochs} - Loss: {loss.item():.4f}")
@@ -277,6 +296,7 @@ class Trainer:
             
         print('Training complete')
         torch.save(self.model.state_dict(), self.save_path)
+        torch.save(self.ema.shadow, self.save_path.replace('.pth', '_ema.pth'))
 
     def eval_model(self):
         self.model.eval()
@@ -298,5 +318,28 @@ class Trainer:
 
             print('Evaluation complete')
             self.model.train()
+        
+        return average_losses
+    
+    def eval_ema_model(self):
+        self.ema.model.eval()
+        losses = [[] for _ in range(self.diffusion.noise_steps)]
+
+        with torch.no_grad():
+            progress_bar = tqdm(self.testloader, desc='Evaluating EMA model')
+            for i, (images, _) in enumerate(progress_bar):
+                images = images.to(self.device)
+                t = self.diffusion.sample_timesteps(images.size(0)).to(self.device)
+                x_t, noise = self.diffusion.noise_images(images, t)
+                predicted_noise = self.ema.model(x_t, t)
+
+                for n, pred, time in zip(noise, predicted_noise, t):
+                    loss = self.criterion(pred, n)
+                    losses[time].append(loss.item())
+
+            average_losses = [np.mean(lst) if lst else None for lst in losses]
+
+            print('Evaluation complete')
+            self.ema.model.train()
         
         return average_losses
