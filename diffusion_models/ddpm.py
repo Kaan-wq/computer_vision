@@ -64,7 +64,7 @@ class Diffusion:
             x = torch.randn((n, 3, self.img_size, self.img_size)).to(self.device)
             for i in tqdm(reversed(range(self.noise_steps)), desc='Generating images'):
                 t = torch.full((n,), i, dtype=torch.long).to(self.device)
-                predicted_noise, _ = self.noise_images(x, t)
+                predicted_noise = model(x, t)
                 alpha = self.alpha[t][:, None, None, None]
                 alpha_cumprod = self.alpha_cumprod[t][:, None, None, None]
                 beta = self.beta[t][:, None, None, None]
@@ -271,10 +271,8 @@ class Trainer:
                 images = images.to(self.device)
                 t = self.diffusion.sample_timesteps(images.size(0)).to(self.device)
                 x_t, noise = self.diffusion.noise_images(images, t)
-                prediction = self.model(x_t, t)
-
-                objective = (1 / self.diffusion.alpha[t]) * (x_t - ((self.diffusion.beta[t] / torch.sqrt(1 - self.diffusion.alpha_cumprod[t])) * noise))
-                loss = self.criterion(prediction, objective)
+                predicted_noise = self.model(x_t, t)
+                loss = self.criterion(predicted_noise, noise)
 
                 self.optimizer.zero_grad()
                 loss.backward()
