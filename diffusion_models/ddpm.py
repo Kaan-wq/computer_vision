@@ -197,7 +197,7 @@ class UNet(nn.Module):
         self.up3 = UpConvBlock(128, 64, timestep_dim=self.timestep_dim).to(device)
         self.attention6 = SelfAttentionBlock(64, 64).to(device)
 
-        self.outc = nn.Conv2d(64, out_channels, kernel_size=1).to(device)
+        self.outc = nn.Conv2d(64, out_channels, kernel_size=1).to(device) 
 
     def pos_encoding(self, t, channels):
         inv_freq = 1. / (10000 ** (torch.arange(0, channels, 2).float().to(self.device) / channels))
@@ -230,9 +230,9 @@ class UNet(nn.Module):
         x = self.up3(x, t, x1)
         x = self.attention6(x)
 
-        output = self.outc(x)
+        x = self.outc(x)
 
-        return output
+        return x
     
 
 class EMA:
@@ -271,8 +271,10 @@ class Trainer:
                 images = images.to(self.device)
                 t = self.diffusion.sample_timesteps(images.size(0)).to(self.device)
                 x_t, noise = self.diffusion.noise_images(images, t)
-                predicted_noise = self.model(x_t, t)
-                loss = self.criterion(predicted_noise, noise)
+                prediction = self.model(x_t, t)
+
+                objective = (1 / self.diffusion.alpha[t]) * (x_t - ((self.diffusion.beta[t] / torch.sqrt(1 - self.diffusion.alpha_cumprod[t])) * noise))
+                loss = self.criterion(prediction, objective)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -282,21 +284,24 @@ class Trainer:
 
                 # Update the progress bar with the current loss
                 progress_bar.set_description(f"Epoch {epoch + 1}/{epochs} - Loss: {loss.item():.4f}")
-            
-            generated_images = self.diffusion.generate_images(self.model, n=images.size(0))
-            generated_images = np.clip(generated_images.cpu(), 0, 1)
 
-            fig, axs = plt.subplots(1, 4, figsize=(4 * 3, 3))
-            for i, ax in enumerate(axs.flat):
-                img = generated_images[i].cpu().permute(1, 2, 0)
-                ax.imshow(img)
-                ax.axis('off')
-            plt.tight_layout()
-            plt.show()
+            if (epoch + 1) % 10 == 0:
+
+                generated_images = self.diffusion.generate_images(self.model, n=images.size(0))
+                generated_images = np.clip(generated_images.cpu(), 0, 1)
+
+                fig, axs = plt.subplots(1, 4, figsize=(4 * 3, 3))
+                for i, ax in enumerate(axs.flat):
+                    img = generated_images[i].cpu().permute(1, 2, 0)
+                    ax.imshow(img)
+                    ax.axis('off')
+                plt.tight_layout()
+                plt.show()
             
         print('Training complete')
         torch.save(self.model.state_dict(), self.save_path)
         torch.save(self.ema.shadow, self.save_path.replace('.pth', '_ema.pth'))
+        print('Model saved')
 
     def eval_model(self):
         self.model.eval()
